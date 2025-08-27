@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ocean Saver Game 🌊</title>
+<style>
+body { margin:0; font-family: Arial, sans-serif; background:#004d73; color:white; overflow:hidden; }
+#arena { position:relative; width:100vw; height:100vh; overflow:hidden; background:linear-gradient(#004d73,#001d2e); }
+.entity { position:absolute; font-size:2rem; cursor:pointer; user-select:none; }
+#hud { position:absolute; top:10px; left:10px; font-size:1.2rem; display:flex; gap:20px; }
+#panel { position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; }
+#toast { position:absolute; bottom:20px; left:50%; transform:translateX(-50%); background:#fff; color:#000; padding:8px 16px; border-radius:10px; display:none; font-weight:bold; }
+#levelUp { 
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  font-size:5rem; font-weight:bold; color:#fff; display:none;
+  text-shadow:0 0 20px #00eaff, 0 0 40px #00eaff;
+}
+button { padding:10px 20px; font-size:1.2rem; margin-top:10px; border:none; border-radius:8px; cursor:pointer; }
+</style>
+</head>
+<body>
+<div id="arena">
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Lives: <span id="lives">3</span></div>
+    <div>Ocean: <span id="ocean">100</span></div>
+    <div>Time: <span id="timer">120</span>s</div>
+    <div>Level: <span id="level">1</span></div>
+    <div>High Score: <span id="highscore">0</span></div>
+  </div>
+  <div id="panel">
+    <h2>🌊 Ocean Saver 🌊</h2>
+    <p>Collect trash ♻️ (fast!!), avoid creatures 🐢, grab stars ⭐ for extra time! Rare trash = DOUBLE points ✨</p>
+    <button id="startBtn">Start Game</button>
+  </div>
+  <div id="toast"></div>
+  <div id="levelUp"></div>
+</div>
+
+<script>
+const arena = document.getElementById('arena');
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+const oceanEl = document.getElementById('ocean');
+const timerEl = document.getElementById('timer');
+const levelEl = document.getElementById('level');
+const highEl = document.getElementById('highscore');
+const panel = document.getElementById('panel');
+const toast = document.getElementById('toast');
+const startBtn = document.getElementById('startBtn');
+const levelUpEl = document.getElementById('levelUp');
+
+let state = {
+  score:0, lives:3, ocean:100, running:false, timers:[], spawnRate:1200, time:120,
+  level:1, trashCollected:0, levelTargets:[20,40,60,80,100]
+};
+
+let highScore = localStorage.getItem("oceanHighScore") || 0;
+highEl.textContent = highScore;
+
+function setScore(v){ state.score=v; scoreEl.textContent=v; }
+function setLives(v){ state.lives=v; livesEl.textContent=v; }
+function setOcean(v){ state.ocean=Math.max(0,Math.min(100,v)); oceanEl.textContent=state.ocean.toFixed(0); }
+function setTime(v){ state.time=v; timerEl.textContent=v; }
+function setLevel(v){ state.level=v; levelEl.textContent=v; }
+
+function showToast(msg){
+  toast.textContent=msg;
+  toast.style.display='block';
+  setTimeout(()=> toast.style.display='none', 1000);
+}
+
+function spawnEntity(){
+  if(!state.running) return;
+  const el = document.createElement('div');
+  el.classList.add('entity');
+  let roll = Math.random();
+
+  const trashTypes = ['🗑️','🍾','🥤','🛍️','🍔','🥫'];
+  const specialTrash = ['💻','📱','💡'];
+
+  if(roll < 0.55){ 
+    el.textContent = trashTypes[Math.floor(Math.random()*trashTypes.length)];
+    el.dataset.type='trash'; 
+  } else if(roll < 0.65){ 
+    el.textContent = specialTrash[Math.floor(Math.random()*specialTrash.length)];
+    el.dataset.type='special';
+  } else if(roll < 0.85){ 
+    el.textContent='🐢'; el.dataset.type='creature'; 
+  } else { 
+    el.textContent='⭐'; el.dataset.type='star'; 
+  }
+
+  el.style.left = Math.random()* (arena.clientWidth-40) + 'px';
+  el.style.top = '-40px';
+  arena.appendChild(el);
+
+  const duration = Math.max(1.5, 4 - (state.level*0.6)); 
+  const start = Date.now();
+
+  function fall(){
+    const t = (Date.now()-start)/1000;
+    el.style.top = (t/duration * arena.clientHeight) + 'px';
+    if(t<duration && el.isConnected){ 
+      requestAnimationFrame(fall); 
+    } else if(el.isConnected){ 
+      if(el.dataset.type==='trash' || el.dataset.type==='special'){ 
+        endGame(false); 
+      }
+      el.remove(); 
+    }
+  }
+  fall();
+
+  el.addEventListener('click',()=>{
+    if(el.dataset.type==='trash'){
+      setScore(state.score+1);
+      setOcean(state.ocean+3);
+      state.trashCollected++;
+      showToast('+1 ♻️');
+      if(state.trashCollected >= state.levelTargets[state.level-1]){
+        nextLevel();
+      }
+    } else if(el.dataset.type==='special'){
+      setScore(state.score+2);
+      setOcean(state.ocean+5);
+      state.trashCollected++;
+      showToast('✨ DOUBLE POINTS +2 ♻️');
+      if(state.trashCollected >= state.levelTargets[state.level-1]){
+        nextLevel();
+      }
+    } else if(el.dataset.type==='creature'){
+      setLives(state.lives-1);
+      setOcean(state.ocean-8);
+      showToast('Nooo! 🐢');
+    } else if(el.dataset.type==='star'){
+      setScore(state.score+5);
+      setTime(state.time+10);
+      showToast('+5 & ⏱ +10s ⭐');
+    }
+    el.remove();
+    checkGameState();
+  });
+}
+
+function loop(){
+  if(!state.running) return;
+  spawnEntity();
+  const id = setTimeout(loop, state.spawnRate);
+  state.timers.push(id);
+}
+
+function degradeOcean(){
+  if(!state.running) return;
+  setOcean(state.ocean - (0.3 + state.level*0.2));
+  checkGameState();
+  const id = setTimeout(degradeOcean, 900);
+  state.timers.push(id);
+}
+
+function gameTimer(){
+  if(!state.running) return;
+  setTime(state.time-1);
+  if(state.time<=0){ endGame(false); return; }
+  const id = setTimeout(gameTimer,1000);
+  state.timers.push(id);
+}
+
+function checkGameState(){
+  if(state.lives<=0 || state.ocean<=0){ endGame(false); }
+}
+
+function clearTimers(){ state.timers.forEach(id=> clearTimeout(id)); state.timers=[]; }
+
+function startGame(){
+  panel.style.display='none';
+  setScore(0); setLives(3); setOcean(100); setTime(120); setLevel(1);
+  state.running = true;
+  state.spawnRate=1200;
+  state.trashCollected=0;
+  arena.style.background = "linear-gradient(#004d73,#001d2e)";
+  loop(); degradeOcean(); gameTimer();
+  showToast('Go! 🌊');
+}
+
+function nextLevel(){
+  if(state.level >=5){ endGame(true); return; }
+  state.level++;
+  setLevel(state.level);
+  state.spawnRate = Math.max(400, state.spawnRate - 200);
+  showLevelCountdown(state.level);
+}
+
+function showLevelCountdown(lvl){
+  clearTimers(); // pause game while showing countdown
+  let count = 3;
+  levelUpEl.style.display='block';
+  levelUpEl.textContent = `Level ${lvl} in... ${count}`;
+  
+  let countdown = setInterval(()=>{
+    count--;
+    if(count > 0){
+      levelUpEl.textContent = `Level ${lvl} in... ${count}`;
+    } else {
+      clearInterval(countdown);
+      levelUpEl.textContent = `START! 🚀`;
+      setTimeout(()=>{
+        levelUpEl.style.display='none';
+        loop(); degradeOcean(); gameTimer(); // resume game
+      }, 1000);
+    }
+  },1000);
+}
+
+function endGame(win){
+  state.running=false; clearTimers();
+  if(state.score > highScore){
+    highScore = state.score;
+    localStorage.setItem("oceanHighScore", highScore);
+  }
+  highEl.textContent = highScore;
+  const msg = win ? 
+    `You beat all 5 levels! Final Score: ${state.score}` : 
+    `Game Over! Score ${state.score}.`;
+  panel.querySelector('h2').textContent = win ? 'OCEAN HERO!' : 'Game Over';
+  panel.querySelector('p').textContent = msg;
+  panel.style.display='flex';
+}
+
+startBtn.addEventListener('click', startGame);
+</script>
+</body>
+</html>
